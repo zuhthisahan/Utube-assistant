@@ -79,14 +79,30 @@ async def chat_endpoint(request: ChatRequest):
     2. Run LangGraph
     3. Return last AI message
     """
+    global current_state
+    
+    user_msg = HumanMessage(content=request.message)
     user_input = request.message
     
-    # 1. Update State
-    current_state['messages'].append(HumanMessage(content=user_input))
-    
-    # Detect URL Update
-    if "youtube.com" in user_input or "youtu.be" in user_input:
-        current_state['youtube_url'] = user_input
+    # Initialize state if empty
+    if not current_state.get("messages"):
+        current_state = {
+            "messages": [user_msg],
+            "youtube_url": None,
+            "is_processed": False,
+            "image_suggestions": []
+        }
+    else:
+        current_state["messages"].append(user_msg)
+        
+    # If the user provides a NEW YouTube URL, we must force re-processing.
+    if "youtube.com" in request.message or "youtu.be" in request.message:
+        current_state["youtube_url"] = request.message
+        current_state["is_processed"] = False 
+        
+        # Clear the previous context immediately to be safe
+        from .state import STORE
+        STORE.set_df(None)
 
     # 2. Run Graph
     # use stream() to execute the graph steps

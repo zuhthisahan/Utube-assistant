@@ -42,7 +42,7 @@ def init_llm():
     return ChatOpenAI(
         base_url="http://localhost:1234/v1", 
         api_key="lm-studio",
-        model="qwen/qwen3-vl-8b", 
+        model="google/gemma-3n-e4b",  #qwen/qwen3-vl-8b
         temperature=0.1
     )
 
@@ -289,7 +289,7 @@ def consult_mcp_knowledge(query: str):
     
     # 2. Define the async logic inside a wrapper
     async def run_mcp_logic():
-        server_params = StdioServerParameters(command="python", args=["wiki_server.py"])
+        server_params = StdioServerParameters(command="python", args=["../backend/wiki_server.py"])
         try:
             with open(os.devnull, 'wb') as devnull:
                 async with stdio_client(server_params, errlog=devnull) as (read, write):
