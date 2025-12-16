@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Optional: Make the background slightly gray */
+body {
+  /* Fallback color */
+  background-color: #1a1a1a;
+  
+  /* Rich Gradient: Deep Pink/Red to Black */
+  background-image: linear-gradient(to bottom right, #831843, #0f172a);
+  
+  /* Ensure gradient covers the whole screen */
+  min-height: 100vh;
+  background-attachment: fixed;
+}
