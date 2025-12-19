@@ -32,6 +32,14 @@ from mcp.client.stdio import stdio_client
 # Local Imports
 from .state import STORE  # Import the store we just made
 
+import requests 
+import io
+import base64
+from PIL import Image
+# import matplotlib.pyplot as plt
+import numpy as np
+import clip 
+
 #  CONFIG 
 DB_PATH = './chroma_db'
 IMG_DIR = "generated_images"
@@ -39,8 +47,10 @@ os.makedirs(IMG_DIR, exist_ok=True)
 
 #  Helper functions
 def init_llm():
+    
+    base_url = os.getenv("LM_STUDIO_URL", "http://localhost:1234/v1")
     return ChatOpenAI(
-        base_url="http://localhost:1234/v1", 
+        base_url=base_url, 
         api_key="lm-studio",
         model="google/gemma-3n-e4b",  #qwen/qwen3-vl-8b
         temperature=0.1
@@ -50,28 +60,171 @@ def load_vectorstore():
     emb_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     return Chroma(persist_directory=DB_PATH, embedding_function=emb_model, collection_name="video_rag")
 
-def generate_local_image(prompt: str, output_path: str):
-    # (Your exact diffusion code from the notebook)
-    model_id = "runwayml/stable-diffusion-v1-5"
-    try:
-        pipe = StableDiffusionPipeline.from_pretrained(
-            model_id, torch_dtype=torch.float16, use_safetensors=True,
-            cache_dir="./huggingface_cache", low_cpu_mem_usage=True
-        )
-        pipe.to("cuda")
-        pipe.enable_model_cpu_offload()
+# def generate_local_image(prompt: str, output_path: str):
+#     # (Your exact diffusion code from the notebook)
+#     model_id = "runwayml/stable-diffusion-v1-5"
+#     try:
+#         pipe = StableDiffusionPipeline.from_pretrained(
+#             model_id, torch_dtype=torch.float16, use_safetensors=True,
+#             cache_dir="./huggingface_cache", low_cpu_mem_usage=True
+#         )
+#         pipe.to("cuda")
+#         pipe.enable_model_cpu_offload()
         
-        image = pipe(prompt).images[0]
-        image.save(output_path)
+#         image = pipe(prompt).images[0]
+#         image.save(output_path)
         
-        # Cleanup
-        del pipe
-        gc.collect()
-        torch.cuda.empty_cache()
-        return True
-    except Exception as e:
-        print(f"Gen Error: {e}")
-        return False
+#         # Cleanup
+#         del pipe
+#         gc.collect()
+#         torch.cuda.empty_cache()
+#         return True
+#     except Exception as e:
+#         print(f"Gen Error: {e}")
+#         return False
+
+import os
+BASE_URL = os.getenv("SD_BASE_URL", "http://127.0.0.1:7860")
+
+# BASE_URL = "http://127.0.0.1:7860"
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+clip_model, clip_preprocess = clip.load("ViT-B/32", device=device)
+clip_model.eval()
+
+def generate_image(prompt: str,
+                   negative_prompt: str = "blurry, low quality, distorted",
+                   steps: int = 20,
+                   width: int = 512,
+                   height: int = 512) -> Image.Image:
+    payload = {
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "steps": steps,
+        "width": width,
+        "height": height,
+    }
+
+    response = requests.post(f"{BASE_URL}/sdapi/v1/txt2img", json=payload)
+    response.raise_for_status()
+    data = response.json()
+
+    img_b64 = data["images"][0]
+    image_bytes = base64.b64decode(img_b64.split(",", 1)[-1])
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    return img
+
+@torch.no_grad()
+def clip_text_image_similarity(text: str, image: Image.Image) -> float:
+    image_input = clip_preprocess(image).unsqueeze(0).to(device)
+    text_input = clip.tokenize([text]).to(device)
+
+    image_features = clip_model.encode_image(image_input)
+    text_features = clip_model.encode_text(text_input)
+
+    image_features /= image_features.norm(dim=-1, keepdim=True)
+    text_features /= text_features.norm(dim=-1, keepdim=True)
+
+    similarity = (image_features @ text_features.T).item()
+    return float(similarity)
+
+def sharpness_score(image: Image.Image) -> float:
+    gray = image.convert("L")
+    arr = np.array(gray, dtype=np.float32)
+    variance = float(arr.var())
+
+    score = variance / (variance + 1000.0)
+    return score
+
+def technical_quality_score(image: Image.Image) -> float:
+    """
+    Simple non-semantic image quality score.
+    Penalizes very dark / bright images and rewards contrast.
+    """
+    gray = image.convert("L")
+    arr = np.asarray(gray, dtype=np.float32)
+
+    mean = arr.mean()
+    std = arr.std()
+
+    # brightness: ideal ~128
+    brightness_score = max(0.0, 1.0 - abs(mean - 128) / 128)
+
+    # contrast: higher std = better (soft saturation)
+    contrast_score = std / (std + 50.0)
+
+    return float(0.6 * brightness_score + 0.4 * contrast_score)
+
+def rate_image_full(
+    text: str,
+    image: Image.Image,
+    w_clip: float = 0.5,
+    w_sharp: float = 0.3,
+    w_tech: float = 0.2,
+) -> dict:
+    """
+    Rate an image using:
+    - CLIP semantic similarity (text ↔ image)
+    - sharpness score
+    - technical quality score
+
+    Returns all scores + final combined score.
+    """
+    clip_score = clip_text_image_similarity(text, image)
+    sharp_score = sharpness_score(image)
+    tech_score = technical_quality_score(image)
+
+    final_score = (
+        w_clip * clip_score +
+        w_sharp * sharp_score +
+        w_tech * tech_score
+    )
+
+    return {
+        "clip": round(clip_score, 2),
+        "sharpness": round(sharp_score, 2),
+        "technical": round(tech_score, 2),
+        "final": round(final_score, 2),
+    }
+
+
+
+def generate_local_image(
+    image_prompt: str,
+    output_path: str,
+    num_candidates: int =2,
+):
+    
+    images = []
+    score_dicts = []
+
+    # Generate + rate
+    for i in range(num_candidates):
+        print(f"Generating image {i+1}/{num_candidates}...")
+        img = generate_image(image_prompt)
+
+        scores = rate_image_full(image_prompt, img)
+
+        images.append(img)
+        score_dicts.append(scores)
+
+        print(f"  final score = {scores['final']:.4f}")
+
+    # Select best image
+    best_idx = int(np.argmax([s["final"] for s in score_dicts]))
+    best_image = images[best_idx]
+    best_scores = score_dicts[best_idx]
+
+    best_image.save(output_path)
+
+    print(f"Best image score details: {best_scores}")
+
+    # Cleanup
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    return True
 
 # TOOLS 
 

@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  # --- BACKEND SERVICE ---
+  backend:
+    build: ./backend
+    container_name: video_ai_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Code Reload (Maps current folder's backend to container)
+      - ./backend:/app/backend
+      
+      # Persist Data (These files will legally live on D: now)
+      - ./chroma_db:/app/backend/chroma_db
+      - ./generated_images:/app/backend/generated_images
+    environment:
+      # Docker points to Host (Windows) for A1111
+      - SD_BASE_URL=http://host.docker.internal:7860
+      - LM_STUDIO_URL=http://host.docker.internal:1234/v1
+      - PYTHONPATH=/app
+
+  # --- FRONTEND SERVICE ---
+  frontend:
+    build: ./frontend
+    container_name: video_ai_frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
