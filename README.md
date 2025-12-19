@@ -10,6 +10,7 @@ It ingests video transcripts, understands the context using **RAG (Retrieval-Aug
 ## 📺 Demo
 
 👉 **Demo Video:** 
+![demo](https://github.com/zuhthisahan/Utube-assistant/blob/sahan/demo.gif)
 
 
 ---
