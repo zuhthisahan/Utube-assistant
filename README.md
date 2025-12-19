@@ -3,13 +3,14 @@
 A powerful AI-powered assistant that lets you **"chat" with YouTube videos**.  
 It ingests video transcripts, understands the context using **RAG (Retrieval-Augmented Generation)**, and can even generate images based on the video's visual style using a **local Stable Diffusion server**.
 
-![Project Banner](https://via.placeholder.com/1200x400?text=UTube+Assistant+Demo+Banner)
+![Overview](https://github.com/zuhthisahan/Utube-assistant/blob/sahan/generated_images/ui.png)
 
 ---
 
 ## 📺 Demo
 
-👉 **Demo Video:** _Insert your demo video link here_
+👉 **Demo Video:** 
+
 
 ---
 
